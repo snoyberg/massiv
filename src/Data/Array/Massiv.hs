@@ -1,8 +1,11 @@
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE DataKinds #-}
 -- |
 -- Module      : Data.Array.Massiv
 -- Copyright   : (c) Alexey Kuleshevich 2017
@@ -13,13 +16,12 @@
 --
 module Data.Array.Massiv
   ( module Data.Array.Massiv.Common
-  , module Data.Array.Massiv.Common.Shape
   , module Data.Array.Massiv.Delayed
   , module Data.Array.Massiv.Manifest
   , module Data.Array.Massiv.Manifest.Unboxed -- TODO: Remove
   -- * Accessors
   -- ** Size information
-  , size
+  -- , size
   , null
   -- * Construction
   --, makeArray
@@ -41,10 +43,16 @@ module Data.Array.Massiv
   , transposeOuter
   , backpermute
   , unsafeBackpermute
+  , Shape
+  , Slice
   , reshape
   , reshape'
   , extract
   , extractFromTo
+  , append
+  , append'
+  , traverse
+  , traverse2
   -- * Monadic folds
   , foldlM
   , foldlM_
@@ -57,13 +65,16 @@ module Data.Array.Massiv
   , enumFromStepN
   ) where
 
-import Prelude hiding (null, length, map, zipWith, zipWith3)
-import Control.Monad (void)
+import Prelude hiding (null, length, map, zipWith, zipWith3, traverse)
+import Control.Monad (void, guard)
 import Data.Array.Massiv.Common
 import Data.Array.Massiv.Common.Shape
 import Data.Array.Massiv.Delayed
 import Data.Array.Massiv.Manifest
 import Data.Array.Massiv.Manifest.Unboxed
+-- import Data.Maybe (fromMaybe)
+
+
 
 --import qualified  Data.Vector.Unboxed as VU
 
@@ -142,33 +153,62 @@ transpose :: Source r DIM2 e => Array r DIM2 e -> Array D DIM2 e
 transpose = transposeInner
 {-# INLINE transpose #-}
 
+-- transposeInner
+--   :: forall r ix e.
+--      ( Index (Lower ix)
+--      , Source r ix e
+--      )
+--   => Array r ix e -> Array D ix e
+-- transposeInner !arr = DArray (transInner (size arr)) newVal
+--   where
+--     transInner !ix = setIndex ix' (DimIx Proxy :: DimIx (Rank (Lower ix))) n
+--       where
+--         n = getIndex ix (DimIx Proxy :: DimIx (Rank ix))
+--         m = getIndex ix (DimIx Proxy :: DimIx (Rank (Lower ix)))
+--         ix' = setIndex ix (DimIx Proxy :: DimIx (Rank ix)) m
+--     {-# INLINE transInner #-}
+--     newVal !ix = unsafeIndex arr (transInner ix)
+--     {-# INLINE newVal #-}
+-- {-# INLINE transposeInner #-}
+
+-- transposeOuter
+--   :: (Index (Lower ix), Source r ix e)
+--   => Array r ix e -> Array D ix e
+-- transposeOuter !arr = DArray (transOuter (size arr)) newVal
+--   where
+--     transOuter !ix =
+--       maybe (error "transposeOuter: Impossible happened") id $ do
+--         n <- getIndex ix 1
+--         m <- getIndex ix 2
+--         ix' <- setIndex ix 1 m
+--         setIndex ix' 2 n
+--     {-# INLINE transOuter #-}
+--     newVal !ix = unsafeIndex arr (transOuter ix)
+--     {-# INLINE newVal #-}
+-- {-# INLINE transposeOuter #-}
+
 transposeInner
   :: (Index (Lower ix), Source r ix e)
   => Array r ix e -> Array D ix e
 transposeInner !arr = DArray (transInner (size arr)) newVal
   where
-    transInner !ix =
-      maybe (error "transposeInner: Impossible happened") id $ do
-        n <- getIndex ix (rank ix)
-        m <- getIndex ix (rank ix - 1)
-        ix' <- setIndex ix (rank ix) m
-        setIndex ix' (rank ix - 1) n
+    transInner !ix = snocDim (snocDim ixLL n) m where
+      !(ixL, n) = unsnocDim ix
+      !(ixLL, m) = unsnocDim ixL
     {-# INLINE transInner #-}
     newVal !ix = unsafeIndex arr (transInner ix)
     {-# INLINE newVal #-}
 {-# INLINE transposeInner #-}
+
 
 transposeOuter
   :: (Index (Lower ix), Source r ix e)
   => Array r ix e -> Array D ix e
 transposeOuter !arr = DArray (transOuter (size arr)) newVal
   where
-    transOuter !ix =
-      maybe (error "transposeOuter: Impossible happened") id $ do
-        n <- getIndex ix 1
-        m <- getIndex ix 2
-        ix' <- setIndex ix 1 m
-        setIndex ix' 2 n
+    transOuter !ix = consDim n (consDim m ixLL) where
+      !(m, ixL) = unconsDim ix
+      !(n, ixLL) = unconsDim ixL
     {-# INLINE transOuter #-}
     newVal !ix = unsafeIndex arr (transOuter ix)
     {-# INLINE newVal #-}
@@ -245,3 +285,77 @@ enumFromN !s !k = DArray k $ \ !i -> fromIntegral i + s
 enumFromStepN :: Num e => e -> e -> Int -> Array D DIM1 e
 enumFromStepN !s !step !k = DArray k $ \ !i -> fromIntegral i * step + s
 {-# INLINE enumFromStepN #-}
+
+
+unsafeTraverse :: Source r ix' e' =>
+  ix -> ((ix' -> e') -> ix -> e) -> Array r ix' e' -> Array D ix e
+unsafeTraverse sz f arr = DArray sz $ \ !ix -> f (unsafeIndex arr) ix
+{-# INLINE unsafeTraverse #-}
+
+
+unsafeTraverse2
+  :: (Source r1 ix1 e1, Source r2 ix2 e2) =>
+     ix
+     -> ((ix1 -> e1) -> (ix2 -> e2) -> ix -> e)
+     -> Array r1 ix1 e1
+     -> Array r2 ix2 e2
+     -> Array D ix e
+unsafeTraverse2 sz f arr1 arr2 = DArray sz $ \ !ix -> f (unsafeIndex arr1) (unsafeIndex arr2) ix
+{-# INLINE unsafeTraverse2 #-}
+
+
+traverse :: Source r ix' e' =>
+  ix -> ((ix' -> e') -> ix -> e) -> Array r ix' e' -> Array D ix e
+traverse sz f arr = DArray sz $ \ !ix -> f (safeIndex arr) ix
+{-# INLINE traverse #-}
+
+
+
+traverse2
+  :: (Source r1 ix1 e1, Source r2 ix2 e2) =>
+     ix
+     -> ((ix1 -> e1) -> (ix2 -> e2) -> ix -> e)
+     -> Array r1 ix1 e1
+     -> Array r2 ix2 e2
+     -> Array D ix e
+traverse2 sz f arr1 arr2 = DArray sz $ \ !ix -> f (safeIndex arr1) (safeIndex arr2) ix
+{-# INLINE traverse2 #-}
+
+
+append
+  :: (ValidDimIx ix n, Source r1 ix e, Source r ix e) =>
+     DimIx n -> Array r1 ix e -> Array r ix e -> Maybe (Array D ix e)
+append !n !arr1 !arr2 =
+  if sz1 == sz1'
+    then Just $
+         DArray newSz $ \ !ix ->
+           if getIndex ix n < k1
+             then unsafeIndex arr1 ix
+             else let !i = getIndex ix n
+                  in let !ix' = setIndex ix n (i - k1)
+                     in unsafeIndex arr2 ix'
+    else Nothing
+  where
+    !sz1 = size arr1
+    !sz2 = size arr2
+    !k1 = getIndex sz1 n
+    !k2 = getIndex sz2 n
+    !sz1' = setIndex sz2 n k1
+    !newSz = setIndex sz1 n (k1 + k2)
+{-# INLINE append #-}
+
+append'
+  :: (ValidDimIx ix n, Source r1 ix e, Source r2 ix e) =>
+     DimIx n -> Array r1 ix e -> Array r2 ix e -> Array D ix e
+append' !n !arr1 !arr2 =
+  case append n arr1 arr2 of
+    Just arr -> arr
+    Nothing ->
+      error $ "Dimension mismatch: " ++ show arr1 ++ " and " ++ show arr2
+{-# INLINE append' #-}
+
+
+-- traverse :: Source r ix' e => ix -> (ix -> ix') -> Array r ix' e -> Array D ix e
+-- traverse sz f arr = DArray sz $ \ !ix -> safeIndex arr (f ix)
+-- {-# INLINE traverse #-}
+

@@ -5,8 +5,8 @@ module Main where
 import           Compute
 import           Criterion.Main
 import           Data.Array.Massiv                  as M
-
-import           Data.Array.Massiv.Manifest.Unboxed as M
+import           Data.Array.Massiv.Common.Shape     as M
+-- import           Data.Array.Massiv.Manifest.Unboxed as M
 import           Data.Array.Repa                    as R
 import qualified Data.Vector.Unboxed                as VU
 import           Prelude                            as P
@@ -35,7 +35,10 @@ main = do
             [ bench "Massiv 2D: maybeIndex" $
               whnf (maybe (error "impossible") id . M.maybeIndex arrCM) ixM
             , bench "Massiv 2D: index" $ whnf (M.index arrCM) ixM
-            , bench "Massiv 2D: (!)" $ whnf (\ !(i, j) -> (toManifest arrCM) M.<! i M.! j) ixM
+            , bench "Massiv 2D: (!)" $
+              whnf (\ !(i, j) -> (toManifest arrCM) M.<! i M.! j) ixM
+            , bench "Massiv 2D: (<!>)" $
+              whnf (\ !(i, j) -> (toManifest arrCM) M.<!> (dimIx1, i) M.! j) ixM
             , bench "Repa 2D" $ whnf (R.index arrCR) ixR
             , bench "Vector 1D" $ whnf (vecCU VU.!) ix1D
             ]
@@ -75,6 +78,23 @@ main = do
             , bench "Array Repa" $
               whnf (R.computeUnboxedS . R.map (+ 25) . arrR) sz
             , bench "Vector Unboxed" $ whnf (VU.map (+ 25) . vecU) sz
+            ]
+        ]
+    , bgroup
+        "Append"
+        [ bgroup
+            "append"
+            [ bench "Array Massiv" $
+              whnf
+                (\sz' ->
+                   M.computeUnboxedS $ M.append' dimIx1 (arrM sz') (arrM sz'))
+                sz
+            , bench "Array Repa" $
+              whnf
+                (\sz' -> R.computeUnboxedS $ R.append (arrR sz') (arrR sz'))
+                sz
+            , bench "Vector Unboxed" $
+              whnf (\sz' -> (vecU sz') VU.++ (vecU sz')) sz
             ]
         ]
     ]

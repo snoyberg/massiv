@@ -1,3 +1,7 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE BangPatterns            #-}
 {-# LANGUAGE CPP                     #-}
 {-# LANGUAGE FlexibleContexts        #-}
@@ -14,6 +18,69 @@
 --
 module Data.Array.Massiv.Common.Index where
 
+import GHC.TypeLits
+import Data.Proxy
+
+-- type family DIM ix (n :: Nat) :: *
+
+--   --DIM 0 = Z
+-- type instance DIM DIM1 1 = DIM1
+-- type instance DIM DIM2 2 = DIM2
+-- type instance DIM DIM3 3 = DIM3
+-- type instance DIM DIM4 4 = DIM4
+-- type instance DIM DIM5 5 = DIM5
+
+
+
+
+-- getI :: (1 <= n, n <= 3, KnownNat n) => DIM DIM3 3 -> DiX n -> Int
+-- getI (i, j, k) n = case natVal n of
+--                      1 -> i
+--                      2 -> j
+--                      _ -> k
+
+-- data family Sz (n :: Nat) :: *
+
+-- data instance Sz 2 = Sz2 {-# UNPACK #-} !Int {-# UNPACK #-} !Int
+
+-- data instance Sz 3 = Sz3 {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int
+
+
+-- data L x = x :. Int deriving Show
+
+--data I x = Int :. x deriving Show
+
+
+-- type family Ix (n :: Nat) :: * where
+--   Ix 1 = Int
+--   Ix n = L (Ix (n-1))
+
+--type instance DIM 1 = Ix 1
+--type instance DIM 2 = L Int
+-- type instance DIM 3 = DIM3
+-- type instance DIM 4 = DIM4
+-- type instance DIM 5 = DIM5
+
+-- data family Ix (n :: Nat) :: *
+
+-- data instance Ix 3 = Ix3 {-# UNPACK #-} !Int {-# UNPACK #-} !Int {-# UNPACK #-} !Int
+
+
+-- instance Dimension Sz 2 where
+--   tElem (Sz2 m n) = m * n
+
+-- instance Dimension Sz 3 where
+--   tElem (Sz3 m n k) = m * n * k
+
+-- class (KnownNat (Rank ix), Eq ix, Ord ix, Show ix) => Index' ix where
+
+--   unsnocDim' :: Index (Lower ix) => ix -> (Lower ix, Int)
+
+--   getIndex' :: ValidRank ix n => ix -> DiX n -> Int
+
+--   dropIndex' :: ix -> Int -> Maybe (Lower ix)
+
+data D1 = D1
 
 type DIM1 = Int
 
@@ -25,8 +92,20 @@ type DIM4 = (Int, Int, Int, Int)
 
 type DIM5 = (Int, Int, Int, Int, Int)
 
+-- | Relates this dimension to the lower one.
 type family Lower ix :: *
+
+-- | Relates this dimension to the higher one.
 type family Higher ix :: *
+
+type family Rank ix :: Nat
+
+type instance Rank Z = 0
+type instance Rank DIM1 = 1
+type instance Rank DIM2 = 2
+type instance Rank DIM3 = 3
+type instance Rank DIM4 = 4
+type instance Rank DIM5 = 5
 
 type instance Lower Z = DIM5
 type instance Lower DIM1 = Z
@@ -43,10 +122,29 @@ type instance Higher DIM4 = DIM5
 type instance Higher DIM5 = Z
 
 
+data DimIx (n :: Nat) = DimIx (Proxy n) deriving Show
 
-class (Eq ix, Ord ix, Show ix) => Index ix where
+dimIx1 :: DimIx 1
+dimIx1 = DimIx Proxy
 
-  rank :: ix -> Int
+dimIx2 :: DimIx 2
+dimIx2 = DimIx Proxy
+
+dimIx3 :: DimIx 3
+dimIx3 = DimIx Proxy
+
+dimIx4 :: DimIx 4
+dimIx4 = DimIx Proxy
+
+dimIx5 :: DimIx 5
+dimIx5 = DimIx Proxy
+
+
+type ValidDimIx ix n = (1 <= n, n <= Rank ix, KnownNat n)
+
+
+class (KnownNat (Rank ix), 1 <= Rank ix, Rank (Lower ix) <= Rank ix, Eq ix, Ord ix, Show ix) =>
+  Index ix where
 
   zeroIndex :: ix
 
@@ -72,19 +170,19 @@ class (Eq ix, Ord ix, Show ix) => Index ix where
 
   repairIndex :: ix -> ix -> (Int -> Int -> Int) -> (Int -> Int -> Int) -> ix
 
-  consDim :: Index (Lower ix) => Int -> Lower ix -> ix
+  consDim :: Int -> Lower ix -> ix
 
-  unconsDim :: Index (Lower ix) => ix -> (Int, Lower ix)
+  unconsDim :: ix -> (Int, Lower ix)
 
-  snocDim :: Index (Lower ix) => Lower ix -> Int -> ix
+  snocDim :: Lower ix -> Int -> ix
 
-  unsnocDim :: Index (Lower ix) => ix -> (Lower ix, Int)
+  unsnocDim :: ix -> (Lower ix, Int)
 
-  getIndex :: ix -> Int -> Maybe Int
+  getIndex :: ValidDimIx ix n => ix -> DimIx n -> Int
 
-  setIndex :: ix -> Int -> Int -> Maybe ix
+  setIndex :: ValidDimIx ix n => ix -> DimIx n -> Int -> ix
 
-  dropIndex :: ix -> Int -> Maybe (Lower ix)
+  dropIndex :: ValidDimIx ix n => ix -> DimIx n -> Lower ix
 
   iter :: ix -> ix -> Int -> (Int -> Int -> Bool) -> a -> (ix -> a -> a) -> a
 
@@ -141,8 +239,6 @@ data Z = Z deriving (Eq, Ord, Show)
 
 
 instance Index DIM1 where
-  rank _ = 1
-  {-# INLINE rank #-}
   zeroIndex = 0
   {-# INLINE zeroIndex #-}
   totalElem = id
@@ -166,14 +262,11 @@ instance Index DIM1 where
   {-# INLINE snocDim #-}
   unsnocDim i = (Z, i)
   {-# INLINE unsnocDim #-}
-  getIndex i 1 = Just i
-  getIndex _ _ = Nothing
+  getIndex i _ = i
   {-# INLINE getIndex #-}
-  setIndex _ 1 i = Just i
-  setIndex _ _ _ = Nothing
+  setIndex _ _ x = x
   {-# INLINE setIndex #-}
-  dropIndex _ 1 = Just Z
-  dropIndex _ _ = Nothing
+  dropIndex _ _ = Z
   {-# INLINE dropIndex #-}
   liftIndex f = f
   {-# INLINE liftIndex #-}
@@ -188,8 +281,6 @@ instance Index DIM1 where
 
 
 instance Index DIM2 where
-  rank _ = 2
-  {-# INLINE rank #-}
   zeroIndex = (0, 0)
   {-# INLINE zeroIndex #-}
   totalElem !(m, n) = m * n
@@ -208,17 +299,20 @@ instance Index DIM2 where
   {-# INLINE snocDim #-}
   unsnocDim = id
   {-# INLINE unsnocDim #-}
-  getIndex (i, _) 1 = Just i
-  getIndex (_, j) 2 = Just j
-  getIndex _      _ = Nothing
+  getIndex (i, j) dIx =
+    case natVal dIx of
+      1 -> i
+      _ -> j
   {-# INLINE getIndex #-}
-  setIndex (_, j) 1 i = Just (i, j)
-  setIndex (i, _) 2 j = Just (i, j)
-  setIndex _      _ _ = Nothing
+  setIndex (i, j) dIx x =
+    case natVal dIx of
+      1 -> (x, j)
+      _ -> (i, x)
   {-# INLINE setIndex #-}
-  dropIndex (_, j) 1 = Just j
-  dropIndex (i, _) 2 = Just i
-  dropIndex _      _ = Nothing
+  dropIndex (i, j) dIx =
+    case natVal dIx of
+      1 -> j
+      _ -> i
   {-# INLINE dropIndex #-}
   repairIndex = repairIndexRec
   {-# INLINE repairIndex #-}
@@ -235,8 +329,6 @@ instance Index DIM2 where
 
 
 instance Index DIM3 where
-  rank _ = 3
-  {-# INLINE rank #-}
   zeroIndex = (0, 0, 0)
   {-# INLINE zeroIndex #-}
   totalElem !(m, n, o) = m * n * o
@@ -258,20 +350,23 @@ instance Index DIM3 where
   {-# INLINE snocDim #-}
   unsnocDim (i, j, k) = ((i, j), k)
   {-# INLINE unsnocDim #-}
-  getIndex (i, _, _) 1 = Just i
-  getIndex (_, j, _) 2 = Just j
-  getIndex (_, _, k) 3 = Just k
-  getIndex _         _ = Nothing
+  getIndex (i, j, k) dIx =
+    case natVal dIx of
+      1 -> i
+      2 -> j
+      _ -> k
   {-# INLINE getIndex #-}
-  setIndex (_, j, k) 1 i = Just (i, j, k)
-  setIndex (i, _, k) 2 j = Just (i, j, k)
-  setIndex (i, j, _) 3 k = Just (i, j, k)
-  setIndex _      _ _ = Nothing
+  setIndex (i, j, k) dIx x =
+    case natVal dIx of
+      1 -> (x, j, k)
+      2 -> (i, x, k)
+      _ -> (i, j, x)
   {-# INLINE setIndex #-}
-  dropIndex (_, j, k) 1 = Just (j, k)
-  dropIndex (i, _, k) 2 = Just (i, k)
-  dropIndex (i, j, _) 3 = Just (i, j)
-  dropIndex _      _ = Nothing
+  dropIndex (i, j, k) dIx =
+    case natVal dIx of
+      1 -> (j, k)
+      2 -> (i, k)
+      _ -> (i, j)
   {-# INLINE dropIndex #-}
   repairIndex = repairIndexRec
   {-# INLINE repairIndex #-}
@@ -288,8 +383,6 @@ instance Index DIM3 where
 
 
 instance Index DIM4 where
-  rank _ = 4
-  {-# INLINE rank #-}
   zeroIndex = (0, 0, 0, 0)
   {-# INLINE zeroIndex #-}
   totalElem !(n1, n2, n3, n4) = n1 * n2 * n3 * n4
@@ -308,29 +401,33 @@ instance Index DIM4 where
   {-# INLINE snocDim #-}
   unsnocDim (i1, i2, i3, i4) = ((i1, i2, i3), i4)
   {-# INLINE unsnocDim #-}
-  getIndex (i1,  _,  _,  _) 1 = Just i1
-  getIndex ( _, i2,  _,  _) 2 = Just i2
-  getIndex ( _,  _, i3,  _) 3 = Just i3
-  getIndex ( _,  _,  _, i4) 4 = Just i4
-  getIndex _                _ = Nothing
+  getIndex (i1, i2, i3, i4) dIx =
+    case natVal dIx of
+      1 -> i1
+      2 -> i2
+      3 -> i3
+      _ -> i4
   {-# INLINE getIndex #-}
-  setIndex ( _, i2, i3, i4) 1 i1 = Just (i1, i2, i3, i4)
-  setIndex (i1,  _, i3, i4) 2 i2 = Just (i1, i2, i3, i4)
-  setIndex (i1, i2,  _, i4) 3 i3 = Just (i1, i2, i3, i4)
-  setIndex (i1, i2, i3,  _) 4 i4 = Just (i1, i2, i3, i4)
-  setIndex _                _  _ = Nothing
+  setIndex (i1, i2, i3, i4) dIx x =
+    case natVal dIx of
+      1 -> ( x, i2, i3, i4)
+      2 -> (i1,  x, i3, i4)
+      3 -> (i1, i2,  x, i4)
+      _ -> (i1, i2, i3,  x)
   {-# INLINE setIndex #-}
-  dropIndex ( _, i2, i3, i4) 1 = Just (i2, i3, i4)
-  dropIndex (i1,  _, i3, i4) 2 = Just (i1, i3, i4)
-  dropIndex (i1, i2,  _, i4) 3 = Just (i1, i2, i4)
-  dropIndex (i1, i2, i3,  _) 4 = Just (i1, i2, i3)
-  dropIndex _      _ = Nothing
+  dropIndex (i1, i2, i3, i4) dIx =
+    case natVal dIx of
+      1 -> (i2, i3, i4)
+      2 -> (i1, i3, i4)
+      3 -> (i1, i2, i4)
+      _ -> (i1, i2, i3)
   {-# INLINE dropIndex #-}
   repairIndex = repairIndexRec
   {-# INLINE repairIndex #-}
   liftIndex f (i0, i1, i2, i3) = (f i0, f i1, f i2, f i3)
   {-# INLINE liftIndex #-}
-  liftIndex2 f (i0, i1, i2, i3) (j0, j1, j2, j3) = (f i0 j0, f i1 j1, f i2 j2, f i3 j3)
+  liftIndex2 f (i0, i1, i2, i3) (j0, j1, j2, j3) =
+    (f i0 j0, f i1 j1, f i2 j2, f i3 j3)
   {-# INLINE liftIndex2 #-}
   iter = iterRec
   {-# INLINE iter #-}
@@ -341,8 +438,6 @@ instance Index DIM4 where
 
 
 instance Index DIM5 where
-  rank _ = 5
-  {-# INLINE rank #-}
   zeroIndex = (0, 0, 0, 0, 0)
   {-# INLINE zeroIndex #-}
   totalElem !(n1, n2, n3, n4, n5) = n1 * n2 * n3 * n4 * n5
@@ -361,26 +456,29 @@ instance Index DIM5 where
   {-# INLINE snocDim #-}
   unsnocDim (i1, i2, i3, i4, i5) = ((i1, i2, i3, i4), i5)
   {-# INLINE unsnocDim #-}
-  getIndex (i1,  _,  _,  _,  _) 1 = Just i1
-  getIndex ( _, i2,  _,  _,  _) 2 = Just i2
-  getIndex ( _,  _, i3,  _,  _) 3 = Just i3
-  getIndex ( _,  _,  _, i4,  _) 4 = Just i4
-  getIndex ( _,  _,  _,  _, i5) 5 = Just i5
-  getIndex _                _ = Nothing
+  getIndex (i1, i2, i3, i4, i5) dIx =
+    case natVal dIx of
+      1 -> i1
+      2 -> i2
+      3 -> i3
+      4 -> i4
+      _ -> i5
   {-# INLINE getIndex #-}
-  setIndex ( _, i2, i3, i4, i5) 1 i1 = Just (i1, i2, i3, i4, i5)
-  setIndex (i1,  _, i3, i4, i5) 2 i2 = Just (i1, i2, i3, i4, i5)
-  setIndex (i1, i2,  _, i4, i5) 3 i3 = Just (i1, i2, i3, i4, i5)
-  setIndex (i1, i2, i3,  _, i5) 4 i4 = Just (i1, i2, i3, i4, i5)
-  setIndex (i1, i2, i3, i4,  _) 5 i5 = Just (i1, i2, i3, i4, i5)
-  setIndex _                    _  _ = Nothing
+  setIndex (i1, i2, i3, i4, i5) dIx x =
+    case natVal dIx of
+      1 -> ( x, i2, i3, i4, i5)
+      2 -> (i1,  x, i3, i4, i5)
+      3 -> (i1, i2,  x, i4, i5)
+      4 -> (i1, i2, i3,  x, i5)
+      _ -> (i1, i2, i3,  i4, x)
   {-# INLINE setIndex #-}
-  dropIndex ( _, i2, i3, i4, i5) 1 = Just (i2, i3, i4, i5)
-  dropIndex (i1,  _, i3, i4, i5) 2 = Just (i1, i3, i4, i5)
-  dropIndex (i1, i2,  _, i4, i5) 3 = Just (i1, i2, i4, i5)
-  dropIndex (i1, i2, i3,  _, i5) 4 = Just (i1, i2, i3, i5)
-  dropIndex (i1, i2, i3, i4,  _) 5 = Just (i1, i2, i3, i4)
-  dropIndex _      _ = Nothing
+  dropIndex (i1, i2, i3, i4, i5) dIx =
+    case natVal dIx of
+      1 -> (i2, i3, i4, i5)
+      2 -> (i1, i3, i4, i5)
+      3 -> (i1, i2, i4, i5)
+      4 -> (i1, i2, i3, i5)
+      _ -> (i1, i2, i3, i4)
   {-# INLINE dropIndex #-}
   repairIndex = repairIndexRec
   {-# INLINE repairIndex #-}
@@ -414,7 +512,6 @@ handleBorderIndex border !sz getVal !ix =
     Continue -> getVal (repairIndex sz ix (\ !k !i -> abs i `mod` k)
                         (\ !k !i -> (-i - 2) `mod` k))
 {-# INLINE handleBorderIndex #-}
-
 
 isSafeIndexRec :: (Index (Lower ix), Index ix) => ix -> ix -> Bool
 isSafeIndexRec !sz !ix = isSafeIndex n0 i0 && isSafeIndex szL ixL

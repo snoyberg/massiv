@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns          #-}
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies          #-}
 -- |
 -- Module      : Data.Array.Massiv.Common.Shape
 -- Copyright   : (c) Alexey Kuleshevich 2017
@@ -64,14 +65,14 @@ class (Index (Lower ix), Shape r ix e) => Slice r ix e where
   (<!?) :: Array r ix e -> Int -> Maybe (Array r (Lower ix) e)
 
 
-(<!?>) :: Slice r ix e => Array r ix e -> (Int, Int) -> Maybe (Array r (Lower ix) e)
+(<!?>) :: (ValidDimIx ix n, Slice r ix e) =>
+  Array r ix e -> (DimIx n, Int) -> Maybe (Array r (Lower ix) e)
 (<!?>) arr (dim, i) = do
-  m <- getIndex (size arr) dim
+  let m = getIndex (size arr) dim
   guard $ isSafeIndex m i
-  start <- setIndex zeroIndex dim i
-  cutSz <- setIndex (size arr) dim 1
-  --end <- setIndex (size arr) dim (i + 1)
-  newSz <- dropIndex cutSz dim
+  let start = setIndex zeroIndex dim i
+      cutSz = setIndex (size arr) dim 1
+      newSz = dropIndex cutSz dim
   return $ unsafeReshape newSz (unsafeExtract start cutSz arr)
 
 
@@ -85,7 +86,7 @@ class (Index (Lower ix), Shape r ix e) => Slice r ix e where
 (<?) (Just arr) !ix = arr <!? ix
 {-# INLINE (<?) #-}
 
-(<?>) :: Slice r ix e => Maybe (Array r ix e) -> (Int, Int) -> Maybe (Array r (Lower ix) e)
+(<?>) :: (ValidDimIx ix n, Slice r ix e) => Maybe (Array r ix e) -> (DimIx n, Int) -> Maybe (Array r (Lower ix) e)
 (<?>) Nothing _      = Nothing
 (<?>) (Just arr) !ix = arr <!?> ix
 {-# INLINE (<?>) #-}
@@ -105,11 +106,10 @@ class (Index (Lower ix), Shape r ix e) => Slice r ix e where
     Nothing  -> errorIx "(<!)" arr ix
 {-# INLINE (<!) #-}
 
-(<!>) :: Slice r ix e => Array r ix e -> (Int, Int) -> Array r (Lower ix) e
+(<!>) :: (ValidDimIx ix n, Slice r ix e) =>
+  Array r ix e -> (DimIx n, Int) -> Array r (Lower ix) e
 (<!>) arr (dim, i) =
   case arr <!?> (dim, i) of
     Just res -> res
-    Nothing  -> if dim < 1 || dim > rank (size arr)
-                then error $ "Invalid dimension: " ++ show dim ++ " for: " ++ show arr
-                else errorIx "(<!>)" arr (dim, i)
+    Nothing  -> errorIx ("(<!>) " ++ show dim) arr i
 {-# INLINE (<!>) #-}
